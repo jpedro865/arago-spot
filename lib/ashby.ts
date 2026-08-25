@@ -1,4 +1,4 @@
-const { BOARD } = process.env
+const { BOARD_URL } = process.env
 
 export type Job = {
   id: string
@@ -7,8 +7,8 @@ export type Job = {
 }
 
 export async function getJobs(): Promise<Job[]> {
-  if (!BOARD) throw new Error("Missing BOARD env var")
-  const res = await fetch(BOARD, { next: { revalidate: 3600 } })
+  if (!BOARD_URL) throw new Error("Missing BOARD_URL env var")
+  const res = await fetch(BOARD_URL, { next: { revalidate: 3600 } })
   if (!res.ok) throw new Error(`Ashby ${res.status}`)
   const { jobs } = await res.json()
   return jobs
