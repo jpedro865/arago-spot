@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { ExternalLink } from "lucide-react"
+import { ExternalLink, Loader2 } from "lucide-react"
 
 import type { Job } from "@/lib/ashby"
+import { LIMIT, countChars, type Draft } from "@/lib/generate"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -13,64 +14,148 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 
 export function GenerateForm({ jobs }: { jobs: Job[] }) {
   const [profileUrl, setProfileUrl] = useState("")
   const [jobId, setJobId] = useState(jobs[0]?.id ?? "")
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [message, setMessage] = useState("")
+  const [history, setHistory] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function run(previous: string[]) {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, previous }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error ?? "Generation failed.")
+      setDraft(body)
+      setMessage(body.message)
+      setHistory([...previous, body.message])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Generation failed.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const count = countChars(message)
 
   return (
-    // ponytail: no action yet — step 2 wires this to POST /api/generate
-    <form className="grid gap-5" onSubmit={(e) => e.preventDefault()}>
-      <div className="grid min-w-0 gap-2">
-        <label htmlFor="profile" className="text-sm font-medium">
-          Candidate LinkedIn profile
-        </label>
-        <Input
-          id="profile"
-          type="url"
-          required
-          value={profileUrl}
-          onChange={(e) => setProfileUrl(e.target.value)}
-          placeholder="https://www.linkedin.com/in/..."
-        />
-      </div>
+    <div className="grid gap-6">
+      <form
+        className="grid gap-5"
+        onSubmit={(e) => {
+          e.preventDefault()
+          run([])
+        }}
+      >
+        <div className="grid min-w-0 gap-2">
+          <label htmlFor="profile" className="text-sm font-medium">
+            Candidate LinkedIn profile
+          </label>
+          <Input
+            id="profile"
+            type="url"
+            required
+            value={profileUrl}
+            onChange={(e) => setProfileUrl(e.target.value)}
+            placeholder="https://www.linkedin.com/in/..."
+          />
+          {/* ponytail: ignored until phase 3 — generation runs on the fixture profile */}
+          <p className="text-muted-foreground text-xs">
+            Not read yet — this build generates from a fixed sample profile.
+          </p>
+        </div>
 
-      <div className="grid min-w-0 gap-2">
-        <label htmlFor="job" className="text-sm font-medium">
-          Open role
-        </label>
-        <Select value={jobId} onValueChange={setJobId}>
-          <SelectTrigger
-            id="job"
-            className="w-full *:data-[slot=select-value]:block *:data-[slot=select-value]:truncate"
-          >
-            <SelectValue placeholder="Select a role" />
-          </SelectTrigger>
-          <SelectContent>
-            {jobs.map((job) => (
-              <SelectItem key={job.id} value={job.id}>
-                {job.title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {jobId && (
-          // Ashby posting URLs are always board + id — verified across the whole board
-          <a
-            href={`https://jobs.ashbyhq.com/arago/${jobId}`}
-            target="_blank"
-            rel="noreferrer"
-            className="text-muted-foreground hover:text-primary inline-flex w-fit items-center gap-1 text-xs underline-offset-4 transition-colors hover:underline"
-          >
-            View this posting
-            <ExternalLink className="size-3" />
-          </a>
-        )}
-      </div>
+        <div className="grid min-w-0 gap-2">
+          <label htmlFor="job" className="text-sm font-medium">
+            Open role
+          </label>
+          <Select value={jobId} onValueChange={setJobId}>
+            <SelectTrigger
+              id="job"
+              className="w-full *:data-[slot=select-value]:block *:data-[slot=select-value]:truncate"
+            >
+              <SelectValue placeholder="Select a role" />
+            </SelectTrigger>
+            <SelectContent>
+              {jobs.map((job) => (
+                <SelectItem key={job.id} value={job.id}>
+                  {job.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {jobId && (
+            // Ashby posting URLs are always board + id — verified across the whole board
+            <a
+              href={`https://jobs.ashbyhq.com/arago/${jobId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted-foreground hover:text-primary inline-flex w-fit items-center gap-1 text-xs underline-offset-4 transition-colors hover:underline"
+            >
+              View this posting
+              <ExternalLink className="size-3" />
+            </a>
+          )}
+        </div>
 
-      <Button type="submit" size="lg" disabled={!profileUrl}>
-        Generate message
-      </Button>
-    </form>
+        <Button type="submit" size="lg" disabled={!profileUrl || loading}>
+          {loading && <Loader2 className="animate-spin" />}
+          {draft ? "Generate again" : "Generate message"}
+        </Button>
+      </form>
+
+      {error && (
+        <p role="alert" className="text-destructive min-w-0 text-sm break-words">
+          {error}
+        </p>
+      )}
+
+      {draft && (
+        <div className="grid gap-2 border-t pt-6">
+          <label htmlFor="message" className="text-sm font-medium">
+            Connection message
+          </label>
+          <Textarea
+            id="message"
+            rows={6}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+          <div className="flex items-center justify-between gap-4">
+            <p
+              className={
+                count > LIMIT
+                  ? "text-destructive text-xs tabular-nums"
+                  : "text-muted-foreground text-xs tabular-nums"
+              }
+            >
+              {count}/{LIMIT}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => run(history)}
+            >
+              Regenerate
+            </Button>
+          </div>
+          <p className="text-muted-foreground mt-2 text-xs">
+            Based on: <span className="text-foreground">{draft.evidence}</span>
+          </p>
+        </div>
+      )}
+    </div>
   )
 }

@@ -120,11 +120,9 @@ To be precise rather than flattering: Unipile drives LinkedIn's private endpoint
 
 ### 5.1 Provider and model
 
-**OpenRouter**, called through the `openai` SDK pointed at OpenRouter's base URL (its API is OpenAI-compatible, so this is a two-line client config, not an adapter layer).
+**OpenRouter**, called with plain `fetch` — no SDK.
 
-```ts
-new OpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY })
-```
+The `openai` package was the obvious choice and was rejected once the call was written: this is a single non-streaming POST with a JSON body, and the SDK's value is retries, streaming helpers, and typed params for a surface we use one corner of. `fetch` is ~15 lines and zero dependencies. If a second call shape or streaming ever appears, the SDK earns its place then.
 
 Model: **`anthropic/claude-opus-5`** — verified on OpenRouter's models endpoint at 1M context, $5/$25 per 1M tokens (identical to first-party), with both `structured_outputs` and `reasoning` supported.
 
@@ -161,10 +159,11 @@ The shape:
 ```jsonc
 {
   "message":  "…the ≤300-char connection request…",
-  "evidence": "…the exact snippet from the profile this message is built on…",
-  "job_link": "…the phrase tying it to the role…"
+  "evidence": "…the exact snippet from the profile this message is built on…"
 }
 ```
+
+(`job_link` was specced here originally and dropped when built — nothing rendered it, and the message names the role anyway.)
 
 `evidence` is the anti-hallucination mechanism, and it's the product feature too. The UI renders **"Based on: <evidence>"** under the message, so the recruiter can verify the personalization in one glance instead of re-reading the profile. Grounding you can *see* beats grounding you're promised.
 
@@ -307,7 +306,7 @@ Covered over the logic that fails silently:
 
 - `lib/auth.test.ts` *(written)* — signature forgery, wrong secret, tampered expiry, expired-but-correctly-signed tokens, malformed input, and exact-match-only password comparison. Six cases; this is the only security boundary in the app, so it is the one place tests are not optional.
 - `linkedInUrlToIdentifier()` — trailing slashes, query strings, `/in/` vs company URLs, locale prefixes.
-- `enforceLimit()` — the 300-char validator and retry decision.
+- `lib/generate.test.ts` *(written)* — the limit boundary at exactly 300/301, empty and whitespace-only drafts, and astral characters counted once rather than twice.
 - `resolveJob()` — UUID extraction from a pasted Ashby URL, and the not-found case.
 
 Not tested: the OpenRouter call and the Unipile call. Mocking them would test the mocks. Both are exercised manually against the live services before submission.
@@ -339,7 +338,7 @@ Not user accounts: there is one audience (Arago's reviewers) and no per-user sta
 
 `PASSWORD_SECRET` is what stops the cookie from being forged. Without a signature, `session=ok` in devtools would be a valid session; with it, minting one requires the secret. The two variables are not interchangeable and neither is optional.
 
-Crypto goes through **Web Crypto** (`crypto.subtle`), not Node's `crypto` — middleware runs on the Edge runtime, where the Node module is unavailable. This is the detail most likely to break a naive implementation.
+Crypto goes through **Web Crypto** (`crypto.subtle`), not Node's `crypto` — the proxy runs on the Edge runtime, where the Node module is unavailable. This is the detail most likely to break a naive implementation.
 
 **Development is bypassed.** `NODE_ENV === "development"` returns `next()` immediately, so `npm run dev` needs no password and no env vars. `next build` / `next start` and every Vercel deploy set `NODE_ENV=production` and are therefore gated — running a production build locally will correctly ask for the password.
 
