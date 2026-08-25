@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 
 import { COOKIE, isValidToken } from "@/lib/auth"
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   if (process.env.NODE_ENV === "development") return NextResponse.next()
 
   const { PASSWORD, PASSWORD_SECRET } = process.env

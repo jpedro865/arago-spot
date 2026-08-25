@@ -331,7 +331,7 @@ Not user accounts: there is one audience (Arago's reviewers) and no per-user sta
 
 | Piece | Choice |
 |---|---|
-| Gate | `middleware.ts` — runs before every route except `/login` and static assets |
+| Gate | `proxy.ts` — runs before every route except `/login` and static assets |
 | Credential | `PASSWORD`, compared in constant time against the submitted value |
 | Session | HMAC-SHA256 signed cookie, keyed by `PASSWORD_SECRET`, 7-day expiry |
 | Cookie flags | `httpOnly`, `secure`, `sameSite=lax`, `path=/` |
@@ -343,7 +343,7 @@ Crypto goes through **Web Crypto** (`crypto.subtle`), not Node's `crypto` — mi
 
 **Development is bypassed.** `NODE_ENV === "development"` returns `next()` immediately, so `npm run dev` needs no password and no env vars. `next build` / `next start` and every Vercel deploy set `NODE_ENV=production` and are therefore gated — running a production build locally will correctly ask for the password.
 
-**Fail closed.** If `PASSWORD` or `PASSWORD_SECRET` is missing in production, middleware returns **503** rather than allowing the request. A missing environment variable silently disabling the gate is the classic version of this bug, and it is the one thing here worth being deliberate about.
+**Fail closed.** If `PASSWORD` or `PASSWORD_SECRET` is missing in production, the proxy returns **503** rather than allowing the request. A missing environment variable silently disabling the gate is the classic version of this bug, and it is the one thing here worth being deliberate about.
 
 **Deliberately not built**
 
