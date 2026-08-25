@@ -16,7 +16,7 @@ export default async function Page() {
 
       <header className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-2xl font-semibold tracking-tight text-primary">arago</p>
+          <p className="text-2xl font-semibold tracking-tight text-primary">arago spot</p>
           <h1 className="mt-3 text-xl font-semibold tracking-tight">
             Connection message generator
           </h1>
