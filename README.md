@@ -2,7 +2,8 @@
 
 AI-drafted LinkedIn connection requests for Arago's Talent Acquisition team.
 Paste a candidate's profile, pick an open role, get a grounded message under LinkedIn's
-300-character limit — with the profile detail it was built on shown next to it.
+300-character limit — with the profile detail it was built on shown next to it. If the
+profile can't be fetched, upload their CV instead, on the same screen.
 
 ---
 
@@ -46,13 +47,13 @@ Needs Node ≥ 22 for `--experimental-strip-types`. Also `npm run typecheck` and
                     │                                (public, cached 1h)
                     │  proxy.ts — password gate, Edge runtime  │
                     └──────────────────────────────────────────┘
-                                     │  POST { profileUrl, jobId, previous }
+                                     │  POST { profileUrl | pdf, jobId, previous }
                                      ▼
                     ┌──────────────────────────────────────────┐
                     │  /api/generate                           │
                     │   1. resolveJob()   id or pasted URL      │
                     │   2. fetchProfile() ────────► Unipile ──► LinkedIn
-                    │                                (cached 1h)
+                    │      or the uploaded CV        (cached 1h)
                     │   3. generate()     ────────► OpenRouter ─► Claude
                     │      └─ ≤300 chars enforced in code,      │
                     │         one retry, never truncated        │
@@ -97,6 +98,13 @@ once, and CRLF counts as one break.
 the profile snippet it built on, quoted verbatim, and the UI renders it under the message. The
 recruiter verifies the personalisation at a glance instead of re-reading the profile. Grounding
 you can see beats grounding you're promised.
+
+**The CV fallback sends the PDF, it does not parse it.** A CV is the worst case for a text
+extractor — two columns, a sidebar, a skills table — and extraction scrambles reading order
+silently, which is exactly the failure `evidence` exists to catch. Claude reads the PDF natively,
+pages as images included, so layout and scanned CVs both come free. It costs roughly two cents
+more per draft than sending extracted text, which is not a price worth a dependency and a
+category of invisible bug. Details and the numbers: [`docs/DESIGN.md`](docs/DESIGN.md) §4.3.
 
 **OpenRouter over a direct Anthropic call.** Model choice becomes an env var, so
 `claude-opus-5` vs `claude-haiku-4.5` is a measurable comparison rather than an opinion. Called

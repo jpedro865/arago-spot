@@ -1,20 +1,24 @@
 import { getJobs, resolveJob } from "@/lib/ashby"
 import { UserError, publicMessage } from "@/lib/errors"
-import { generate } from "@/lib/generate"
+import { type Candidate, checkPdf, generate } from "@/lib/generate"
 import { log } from "@/lib/log"
 import { fetchProfile } from "@/lib/unipile"
 
 export async function POST(req: Request) {
   const started = Date.now()
   const body = await req.json().catch(() => null)
+  // the CV arrives as a `data:application/pdf;base64,…` URL — never logged, it is ~1 MB of it
+  const pdf: string | null = typeof body?.pdf === "string" ? body.pdf : null
   if (
     !body ||
-    typeof body.profileUrl !== "string" ||
-    typeof body.jobId !== "string"
+    typeof body.jobId !== "string" ||
+    (!pdf && typeof body.profileUrl !== "string")
   ) {
-    log.warn("generate: bad request", { body })
+    log.warn("generate: bad request", { jobId: body?.jobId, pdf: !!pdf })
     return Response.json(
-      { error: "profileUrl and jobId are required." },
+      {
+        error: "A LinkedIn profile URL or a PDF CV, and a jobId, are required.",
+      },
       { status: 400 }
     )
   }
@@ -24,6 +28,7 @@ export async function POST(req: Request) {
 
   // `previous` is non-empty only on Regenerate — the two paths are worth telling apart in the logs
   log.info("generate: request", {
+    source: pdf ? "pdf" : "linkedin",
     profileUrl: body.profileUrl,
     jobId: body.jobId,
     regenerate: previous.length > 0,
@@ -38,13 +43,18 @@ export async function POST(req: Request) {
       throw new UserError("Unknown role — pick one from the list.")
     }
 
-    const profile = await fetchProfile(body.profileUrl)
-    const draft = await generate(profile, job, previous)
+    if (pdf) checkPdf(pdf)
+    // an uploaded CV wins over the URL: it is only ever offered after the URL path failed
+    const candidate: Candidate = pdf
+      ? { pdf }
+      : await fetchProfile(body.profileUrl)
+    const draft = await generate(candidate, job, previous)
     log.info("generate: ok", { ms: Date.now() - started })
     return Response.json(draft)
   } catch (e) {
     log.error("generate: failed", {
       ms: Date.now() - started,
+      source: pdf ? "pdf" : "linkedin",
       profileUrl: body.profileUrl,
       err: e,
     })

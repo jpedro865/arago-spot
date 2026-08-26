@@ -89,13 +89,34 @@ Verified live. One unauthenticated GET returns the entire board including `descr
 
 The second path into the same pipeline, for when Unipile is down, rate-limited, or out of contract — and for candidates the connected account simply cannot see.
 
-**We do not parse the PDF ourselves.** It is sent as a `file` content block with OpenRouter's `file-parser` plugin set to `engine: "native"`, which passes the PDF straight through to Claude (which accepts PDFs natively) and bills it as input tokens. That deletes `pdf-parse`, the text-extraction quality problem, and the serverless bundling headache in one move.
+**We do not parse the PDF ourselves.** It is sent as a `file` content block and Claude reads it natively. That deletes `pdf-parse`, the serverless bundling headache, and — the reason that actually matters — the text-extraction quality problem.
 
 ```jsonc
-"plugins": [{ "id": "file-parser", "pdf": { "engine": "native" } }]
+{
+  "type": "file",
+  "file": {
+    "filename": "cv.pdf",
+    "file_data": "data:application/pdf;base64,…",
+  },
+}
 ```
 
-If native passthrough misbehaves, `engine: "cloudflare-ai"` (free, PDF → markdown) is the fallback-to-the-fallback. `mistral-ocr` ($2/1k pages) is only worth it for scanned CVs, which is not the common case here.
+**Why not extract the text first.** A CV is the worst possible input for a text extractor. Two columns, a sidebar, a skills table, a header — extraction returns reading order as the bytes happen to sit in the file, which interleaves the columns and hands the model a scrambled document that still _looks_ like text. Nothing downstream can tell that apart from a badly written CV, so the failure is silent: a generic message, or `evidence` quoting a sentence the candidate never wrote. §5.2 exists to make hallucination visible; feeding it a mangled source defeats it. A designed CV also carries information in its layout — what is emphasised, what is grouped, what is a heading — and native processing renders each page as an image alongside the text, so Claude sees that. Scanned CVs, where extraction returns nothing at all, come free with the same decision.
+
+**And the cost is not the deciding factor at this volume.** Native PDF billing is text tokens plus one page image, roughly 2,300 tokens per page (Anthropic documents 1,500–3,000 text tokens per page; AWS publishes ~7,000 for a 3-page PDF in visual mode against ~1,000 for text-only extraction — a ~5× multiplier that our own 3-page sample, 5,959 extractable characters ≈ 1,500 tokens, matches). At `claude-opus-5`'s $5/1M input:
+
+| Path                         | Tokens for a 2-page CV | Input cost |
+| ---------------------------- | ---------------------- | ---------- |
+| Text extracted, sent as text | ~1,000                 | $0.005     |
+| PDF sent natively            | ~4,600                 | $0.023     |
+
+Under two cents of difference per draft, against a workflow whose entire premise is beating a recruiter writing the message by hand. Buying layout fidelity and scanned-CV support for that is not a close call, and the §5.1 position stands: cost is not the design constraint here, quality of the one paragraph is.
+
+**No `file-parser` plugin block.** OpenRouter already defaults to the model's own file handling, so specifying `engine: "native"` is a no-op on Claude — and it turns a swapped `OPENROUTER_MODEL` (§5.1's whole point) into a hard error on any model without native file input, where the default instead falls back to `mistral-ocr` at $2/1k pages, about $0.004 per CV. The line that changes nothing on the happy path and breaks the comparison path is the line not to write. If native passthrough ever misbehaves, `engine: "cloudflare-ai"` (free, PDF → markdown) is the fallback-to-the-fallback and is a one-line addition then.
+
+**Entry point: always on screen.** The upload is not gated on a failed lookup — see §6. A recruiter with only a CV never produces the error that would have revealed it.
+
+**Size ceiling: 3 MB**, checked on both sides (`checkPdf`, `lib/generate.ts`). Vercel caps a function request body at 4.5 MB and base64 inflates a file by a third, so a larger CV would fail as an opaque 413 rather than a sentence a recruiter can act on.
 
 ### 4.4 Why not scraping, and why not LinkedIn's official API
 
@@ -205,7 +226,7 @@ One screen. No routing, no wizard, no modal.
 - **Live character counter**, turning red past 300 (it can only happen after a manual edit).
 - **Copy** puts it on the clipboard in one click — the recruiter's next action is pasting it into LinkedIn.
 - **Regenerate** re-posts the _already fetched_ profile and job. No refetch, no Unipile call, no rate-limit burn — and it passes the previous messages so the new one is genuinely different, not a reshuffle.
-- Errors are specific and actionable: profile not fetchable → the PDF upload appears inline, on the same screen.
+- Errors are specific and actionable, and the CV upload sits under the form permanently rather than being revealed by the error it answers. Error-gating it was the first build and it was wrong: Generate is disabled without a URL, so the uploader was unreachable for a candidate you only have a CV for — exactly the case §4.3 exists for. It stays visually secondary (dashed, below the button), so the §2 path is still paste → pick → Generate.
 
 Deliberately **not** building: tone/length selectors, message history, multi-candidate batching, accounts. Each is a plausible v2 and each dilutes a workflow whose whole value is being short.
 
@@ -358,7 +379,7 @@ Crypto goes through **Web Crypto** (`crypto.subtle`), not Node's `crypto` — th
 
 | Risk                                                 | Mitigation                                                                                                                                                                    |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unipile trial expires, or billing stops              | PDF fallback keeps the product usable regardless — **but it is built last (§10), so this mitigation arrives late**                                                            |
+| Unipile trial expires, or billing stops              | PDF fallback keeps the product usable regardless — shipped                                                                                                                    |
 | LinkedIn rate-limits or blocks the connected account | Regenerate never refetches; one profile fetch per candidate; PDF fallback                                                                                                     |
 | Thin profile → generic message                       | `evidence` field makes weakness visible instead of hidden; prompt is instructed to admit insufficiency rather than invent                                                     |
 | A profile the connected account cannot see           | Error message says exactly that and offers the PDF path inline                                                                                                                |
@@ -374,11 +395,13 @@ Crypto goes through **Web Crypto** (`crypto.subtle`), not Node's `crypto` — th
 3. Unipile integration behind the same interface — **done**; the fixture is deleted, `lib/unipile.ts` maps `GET /users/{id}` onto the same `Profile`, and nothing above it changed. Not yet exercised against the live API (§9), so the first real call is the one to watch.
 4. UI polish, copy, error states — **done**; Copy button, stale drafts cleared when the candidate or role changes, and `UserError` (`lib/errors.ts`) splits the errors worth showing a recruiter from the upstream bodies that only belong in the logs. Skipped `sonner`/`skeleton` — the Copy button confirms itself and §5.1 already chose the spinner.
 5. Tests, README, deploy — **tests and README done**, deploy is the remaining step. All four §7 targets now exist (22 cases); `resolveJob()` was described in §2/§4.2 but had never actually been built, so pasted job URLs silently did nothing until now. `next build` is clean. **Shippable once deployed.**
-6. PDF fallback
+6. PDF fallback — **done**; the CV rides the same `POST /api/generate` as a `data:` URL, `generate()` takes `Profile | { pdf }`, and the upload appears inline under the error that caused it. No new dependency and no new endpoint. §4.3 records why the PDF is not parsed first, and what the extra ~2 cents a draft buys.
 
 Steps 1–2 produce a working product against fixtures. Unipile, the only external unknown, slots in without changing anything above it. Step 5 is the release gate: everything after it is additive.
 
-**Tradeoff of deferring the PDF fallback to last:** it is the mitigation for two risks in §9 (Unipile trial lapsing, and a profile the connected account cannot see). Until step 6 lands, a Unipile failure is a dead end rather than a degraded path. Accepted deliberately — a fallback is worth nothing while the path it falls back _from_ is still unfinished.
+**Tradeoff of deferring the PDF fallback to last:** it was the mitigation for two risks in §9 (Unipile trial lapsing, and a profile the connected account cannot see), so until step 6 landed a Unipile failure was a dead end rather than a degraded path. Accepted deliberately, and it paid: the fallback reuses the request body, the route and the prompt that steps 1–5 settled, which is why it is one type and one branch rather than a second pipeline.
+
+**Known gap:** Regenerate re-posts the CV, so each variant is billed for the PDF again (§4.3's ~2 cents), where the LinkedIn path is answered by the Data Cache. Worth fixing only if drafting variants off a CV turns out to be the common case rather than the fallback it is meant to be.
 
 ---
 

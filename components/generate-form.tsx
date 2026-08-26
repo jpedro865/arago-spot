@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Check, Copy, ExternalLink, Loader2 } from "lucide-react"
 
 import type { Job } from "@/lib/ashby"
-import { LIMIT, countChars, type Draft } from "@/lib/generate"
+import { LIMIT, MAX_PDF_BYTES, countChars, type Draft } from "@/lib/generate"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 export function GenerateForm({ jobs }: { jobs: Job[] }) {
   const [profileUrl, setProfileUrl] = useState("")
+  const [pdf, setPdf] = useState<string | null>(null)
   const [jobId, setJobId] = useState(jobs[0]?.id ?? "")
   const [draft, setDraft] = useState<Draft | null>(null)
   const [message, setMessage] = useState("")
@@ -38,6 +39,27 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
     setError(null)
   }
 
+  /**
+   * FileReader hands back exactly the `data:application/pdf;base64,…` URL the API wants, so the
+   * CV crosses every hop untouched and no PDF library ever enters the bundle.
+   */
+  function loadPdf(file: File | undefined) {
+    if (!file) return
+    if (file.type !== "application/pdf")
+      return setError("That is not a PDF — export the CV as a PDF and retry.")
+    if (file.size > MAX_PDF_BYTES)
+      return setError(
+        `That PDF is ${(file.size / 1e6).toFixed(1)} MB — keep it under ${MAX_PDF_BYTES / 1e6} MB.`
+      )
+    const reader = new FileReader()
+    reader.onload = () => {
+      clearDraft()
+      setPdf(reader.result as string)
+    }
+    reader.onerror = () => setError("Could not read that file.")
+    reader.readAsDataURL(file)
+  }
+
   async function run(previous: string[]) {
     setLoading(true)
     setError(null)
@@ -45,7 +67,7 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileUrl, jobId, previous }),
+        body: JSON.stringify({ profileUrl, pdf, jobId, previous }),
       })
       // an expired session redirects to /login and answers HTML — .json() would throw
       // "Unexpected token '<'" and show that to the recruiter
@@ -95,7 +117,7 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
           <Input
             id="profile"
             type="url"
-            required
+            required={!pdf}
             value={profileUrl}
             onChange={(e) => {
               setProfileUrl(e.target.value)
@@ -144,7 +166,11 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
           )}
         </div>
 
-        <Button type="submit" size="lg" disabled={!profileUrl || loading}>
+        <Button
+          type="submit"
+          size="lg"
+          disabled={(!profileUrl && !pdf) || loading}
+        >
           {loading && <Loader2 className="animate-spin" />}
           {loading ? "Drafting…" : "Generate message"}
         </Button>
@@ -158,6 +184,46 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
           {error}
         </p>
       )}
+
+      {/*
+       * always visible, not revealed by the error it answers. Generate is disabled
+       * without a URL, so an error-gated uploader is unreachable for the candidate you only
+       * have a CV for — which is the case the whole fallback exists for.
+       */}
+      <div className="grid gap-2 rounded-lg border border-dashed p-4">
+        <label htmlFor="cv" className="text-sm font-medium">
+          {pdf
+            ? "Drafting from this CV, not the URL"
+            : "Or draft from their CV"}
+        </label>
+        <Input
+          id="cv"
+          type="file"
+          accept="application/pdf"
+          // remount on clear, or the native input keeps showing the removed filename
+          key={pdf ? "attached" : "empty"}
+          onChange={(e) => loadPdf(e.target.files?.[0])}
+        />
+        {pdf ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="justify-self-start"
+            onClick={() => {
+              setPdf(null)
+              clearDraft()
+            }}
+          >
+            Go back to the LinkedIn URL
+          </Button>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            PDF, up to {MAX_PDF_BYTES / 1e6} MB. Use it when the profile is not
+            reachable.
+          </p>
+        )}
+      </div>
 
       {draft && (
         <div className="grid gap-2 border-t pt-6">

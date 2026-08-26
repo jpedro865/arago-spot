@@ -19,6 +19,24 @@ export const withinLimit = (s: string) => {
 
 export type Draft = { message: string; evidence: string }
 
+/** What we ground on: a resolved LinkedIn profile, or the CV as a `data:` URL. */
+export type Candidate = Profile | { pdf: string }
+
+const PDF_PREFIX = "data:application/pdf;base64,"
+/** Vercel caps a function request body at 4.5 MB, and base64 inflates a file by a third. */
+export const MAX_PDF_BYTES = 3_000_000
+const MAX_DATA_URL = PDF_PREFIX.length + Math.ceil(MAX_PDF_BYTES / 3) * 4
+
+/** The one string a recruiter can put straight into someone else's API, so it is checked here. */
+export function checkPdf(pdf: string) {
+  if (!pdf.startsWith(PDF_PREFIX))
+    throw new UserError("That is not a PDF — export the CV as a PDF and retry.")
+  if (pdf.length > MAX_DATA_URL)
+    throw new UserError(
+      `That PDF is too large — keep it under ${MAX_PDF_BYTES / 1e6} MB.`
+    )
+}
+
 const SYSTEM = `You write the note attached to a LinkedIn connection request, sent by a recruiter at Arago - a Paris company designing analog and mixed-signal silicon for AI compute.
 
 WHO IS READING THIS
@@ -74,7 +92,7 @@ const schema = {
   additionalProperties: false,
 } as const
 
-function userPrompt(profile: Profile, job: Job, previous: string[]) {
+function profileBlock(profile: Profile) {
   const exp = profile.work_experience
     .map(
       (e) =>
@@ -82,13 +100,21 @@ function userPrompt(profile: Profile, job: Job, previous: string[]) {
     )
     .join("\n")
   return [
-    `CANDIDATE PROFILE`,
     `Name: ${profile.name}`,
     `Headline: ${profile.headline}`,
     `Location: ${profile.location}`,
     `Experience:\n${exp}`,
     `Education: ${profile.education.map((e) => `${e.degree}, ${e.school}`).join("; ")}`,
     `Skills: ${profile.skills.join(", ")}`,
+  ].join("\n")
+}
+
+function userPrompt(candidate: Candidate, job: Job, previous: string[]) {
+  return [
+    `CANDIDATE PROFILE`,
+    "pdf" in candidate
+      ? `Attached as a PDF CV. Read it as the profile — every rule above applies to it, and "evidence" quotes from it verbatim.`
+      : profileBlock(candidate),
     ``,
     `OPEN ROLE: ${job.title}`,
     job.descriptionPlain.slice(0, 6000),
@@ -98,15 +124,37 @@ function userPrompt(profile: Profile, job: Job, previous: string[]) {
   ].join("\n")
 }
 
-async function call(
-  messages: { role: string; content: string }[]
-): Promise<Draft> {
+type Part =
+  | { type: "text"; text: string }
+  | { type: "file"; file: { filename: string; file_data: string } }
+type Message = { role: string; content: string | Part[] }
+
+/** The base64 CV would be ~1 MB on one log line; the prompt is the part worth reading. */
+const forLog = (m: Message): Message =>
+  typeof m.content === "string"
+    ? m
+    : {
+        ...m,
+        content: m.content.map((p) =>
+          p.type === "file"
+            ? {
+                ...p,
+                file: {
+                  ...p.file,
+                  file_data: `<${p.file.file_data.length} chars>`,
+                },
+              }
+            : p
+        ),
+      }
+
+async function call(messages: Message[]): Promise<Draft> {
   const key = process.env.OPENROUTER_API_KEY
   if (!key) throw new Error("OPENROUTER_API_KEY is not set.")
 
   // || not ?? — an unset-but-present `OPENROUTER_MODEL=` is "", which ?? happily passes through
   const model = process.env.OPENROUTER_MODEL || "anthropic/claude-opus-5"
-  log.debug("openrouter: request", { model, messages })
+  log.debug("openrouter: request", { model, messages: messages.map(forLog) })
 
   const started = Date.now()
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -173,17 +221,32 @@ async function call(
 }
 
 export async function generate(
-  profile: Profile,
+  candidate: Candidate,
   job: Job,
   previous: string[] = []
 ): Promise<Draft> {
-  const messages = [
+  const prompt = userPrompt(candidate, job, previous)
+  // OpenRouter routes a `file` part to the model's own PDF support first, so Claude reads the
+  // CV's layout itself — no text extractor of ours to mangle a two-column CV (DESIGN §4.3).
+  const messages: Message[] = [
     { role: "system", content: SYSTEM },
-    { role: "user", content: userPrompt(profile, job, previous) },
+    {
+      role: "user",
+      content:
+        "pdf" in candidate
+          ? [
+              {
+                type: "file",
+                file: { filename: "cv.pdf", file_data: candidate.pdf },
+              },
+              { type: "text", text: prompt },
+            ]
+          : prompt,
+    },
   ]
 
   log.info("generate: drafting", {
-    candidate: profile.name,
+    candidate: "pdf" in candidate ? "PDF CV" : candidate.name,
     job: job.title,
     attemptsToBeat: previous.length,
   })
