@@ -273,7 +273,7 @@ Verified contrast — every pair passes its WCAG threshold:
 | Primary against page | 7.91:1 | 5.19:1 | 3.0 (non-text) |
 | Muted text on background | 6.05:1 | 7.73:1 | 4.5 (AA) |
 
-Theme switching is `next-themes` with `class` strategy, defaulting to system.
+Theme switching is `next-themes` with `class` strategy, defaulting to **light** — the brand colour is only pure `#3F00FF` on white, so a first-time reviewer should land on the mode that shows it. Dark is one click (or `d`) away and is remembered. `enableSystem` is off: nothing sets `"system"` now that the toggle flips light/dark directly.
 
 ### 6.2 shadcn setup
 
