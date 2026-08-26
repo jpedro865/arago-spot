@@ -1,4 +1,5 @@
 import { getJobs } from "@/lib/ashby"
+import { UserError, publicMessage } from "@/lib/errors"
 import { generate } from "@/lib/generate"
 import { log } from "@/lib/log"
 import { fetchProfile } from "@/lib/unipile"
@@ -28,24 +29,28 @@ export async function POST(req: Request) {
     regenerate: previous.length > 0,
   })
 
-  const job = (await getJobs()).find((j) => j.id === body.jobId)
-  if (!job) {
-    log.warn("generate: unknown job", { jobId: body.jobId })
-    return Response.json({ error: "Unknown role." }, { status: 400 })
-  }
-
   try {
+    // inside the try: an Ashby blip must still answer JSON, or the client parses an HTML 500
+    const job = (await getJobs()).find((j) => j.id === body.jobId)
+    if (!job) {
+      log.warn("generate: unknown job", { jobId: body.jobId })
+      throw new UserError("Unknown role — pick one from the list.")
+    }
+
     const profile = await fetchProfile(body.profileUrl)
     const draft = await generate(profile, job, previous)
     log.info("generate: ok", { ms: Date.now() - started })
     return Response.json(draft)
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Generation failed."
     log.error("generate: failed", {
       ms: Date.now() - started,
       profileUrl: body.profileUrl,
       err: e,
     })
-    return Response.json({ error: message }, { status: 502 })
+    // 400 for "you gave us bad input", 502 for "an upstream let us down"
+    return Response.json(
+      { error: publicMessage(e) },
+      { status: e instanceof UserError ? 400 : 502 }
+    )
   }
 }

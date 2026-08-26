@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ExternalLink, Loader2 } from "lucide-react"
+import { Check, Copy, ExternalLink, Loader2 } from "lucide-react"
 
 import type { Job } from "@/lib/ashby"
 import { LIMIT, countChars, type Draft } from "@/lib/generate"
@@ -23,7 +23,20 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
   const [message, setMessage] = useState("")
   const [history, setHistory] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * A draft belongs to one candidate and one role. Change either and it is stale — leaving it
+   * on screen invites copying the previous candidate's message, evidence line and all.
+   * Clearing `history` matters too: it is fed back as "already rejected", so it must not
+   * follow you to a different person.
+   */
+  function clearDraft() {
+    setDraft(null)
+    setHistory([])
+    setError(null)
+  }
 
   async function run(previous: string[]) {
     setLoading(true)
@@ -34,8 +47,15 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileUrl, jobId, previous }),
       })
-      const body = await res.json()
-      if (!res.ok) throw new Error(body.error ?? "Generation failed.")
+      // an expired session redirects to /login and answers HTML — .json() would throw
+      // "Unexpected token '<'" and show that to the recruiter
+      const body = await res.json().catch(() => null)
+      if (!res.ok || !body?.message) {
+        throw new Error(
+          body?.error ??
+            "Couldn't reach the generator. Check your connection and try again."
+        )
+      }
       setDraft(body)
       setMessage(body.message)
       setHistory([...previous, body.message])
@@ -44,6 +64,17 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  function copy() {
+    // only claim it copied if it actually did — clipboard writes reject on an insecure origin
+    navigator.clipboard.writeText(message).then(
+      () => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      },
+      () => setError("Couldn't copy — select the message and copy it manually.")
+    )
   }
 
   const count = countChars(message)
@@ -66,7 +97,10 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
             type="url"
             required
             value={profileUrl}
-            onChange={(e) => setProfileUrl(e.target.value)}
+            onChange={(e) => {
+              setProfileUrl(e.target.value)
+              clearDraft()
+            }}
             placeholder="https://www.linkedin.com/in/..."
           />
         </div>
@@ -75,7 +109,13 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
           <label htmlFor="job" className="text-sm font-medium">
             Open role
           </label>
-          <Select value={jobId} onValueChange={setJobId}>
+          <Select
+            value={jobId}
+            onValueChange={(v) => {
+              setJobId(v)
+              clearDraft()
+            }}
+          >
             <SelectTrigger
               id="job"
               className="w-full *:data-[slot=select-value]:block *:data-[slot=select-value]:truncate"
@@ -106,7 +146,7 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
 
         <Button type="submit" size="lg" disabled={!profileUrl || loading}>
           {loading && <Loader2 className="animate-spin" />}
-          {draft ? "Generate again" : "Generate message"}
+          {loading ? "Drafting…" : "Generate message"}
         </Button>
       </form>
 
@@ -132,6 +172,7 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
           />
           <div className="flex items-center justify-between gap-4">
             <p
+              aria-live="polite"
               className={
                 count > LIMIT
                   ? "text-xs text-destructive tabular-nums"
@@ -139,16 +180,24 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
               }
             >
               {count}/{LIMIT}
+              {count > LIMIT && " — LinkedIn will reject this"}
             </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={loading}
-              onClick={() => run(history)}
-            >
-              Regenerate
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={loading}
+                onClick={() => run(history)}
+              >
+                {loading && <Loader2 className="animate-spin" />}
+                Regenerate
+              </Button>
+              <Button type="button" size="sm" onClick={copy}>
+                {copied ? <Check /> : <Copy />}
+                {copied ? "Copied" : "Copy"}
+              </Button>
+            </div>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
             Based on: <span className="text-foreground">{draft.evidence}</span>

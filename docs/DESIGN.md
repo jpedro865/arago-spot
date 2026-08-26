@@ -376,7 +376,7 @@ Crypto goes through **Web Crypto** (`crypto.subtle`), not Node's `crypto` — th
 1. Ashby fetch + job dropdown *(no dependencies, verified working — ships the UX win first)* — **done**
 2. Claude generation against a hardcoded profile fixture — proves the prompt, the structured output, and the 300-char loop — **done**
 3. Unipile integration behind the same interface — **done**; the fixture is deleted, `lib/unipile.ts` maps `GET /users/{id}` onto the same `Profile`, and nothing above it changed. Not yet exercised against the live API — the trial is timed to submission (§9), so the first real call is the one to watch.
-4. UI polish, copy, error states
+4. UI polish, copy, error states — **done**; Copy button, stale drafts cleared when the candidate or role changes, and `UserError` (`lib/errors.ts`) splits the errors worth showing a recruiter from the upstream bodies that only belong in the logs. Skipped `sonner`/`skeleton` — the Copy button confirms itself and §5.1 already chose the spinner.
 5. Tests, README, deploy — **submittable from here**
 6. PDF fallback
 

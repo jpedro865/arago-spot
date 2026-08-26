@@ -1,3 +1,4 @@
+import { UserError } from "./errors.ts"
 import { log } from "./log.ts"
 import type { Profile } from "./profile"
 
@@ -10,7 +11,9 @@ export function linkedInUrlToIdentifier(url: string): string {
     .trim()
     .match(/linkedin\.com\/(?:[\w-]+\/)?in\/([^/?#\s]+)/i)?.[1]
   if (!slug)
-    throw new Error("Not a LinkedIn profile URL — expected linkedin.com/in/…")
+    throw new UserError(
+      "Not a LinkedIn profile URL — expected linkedin.com/in/…"
+    )
   // browsers percent-encode non-ASCII slugs on copy; Unipile wants the decoded public identifier
   try {
     return decodeURIComponent(slug)
@@ -87,7 +90,7 @@ export async function fetchProfile(profileUrl: string): Promise<Profile> {
 
   if (res.status === 404) {
     log.warn("unipile: profile not reachable", { identifier, ms })
-    throw new Error(
+    throw new UserError(
       "That profile isn't reachable from the connected LinkedIn account. Check the URL, or try another candidate."
     )
   }

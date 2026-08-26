@@ -1,4 +1,5 @@
 import type { Job } from "./ashby"
+import { UserError } from "./errors.ts"
 import { log } from "./log.ts"
 import type { Profile } from "./profile"
 
@@ -215,5 +216,7 @@ export async function generate(
     first: countChars(first.message),
     second: countChars(second.message),
   })
-  throw new Error(`Could not get under ${LIMIT} characters after two attempts.`)
+  throw new UserError(
+    `Could not get the message under ${LIMIT} characters after two attempts. Try regenerating.`
+  )
 }

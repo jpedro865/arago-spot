@@ -18,9 +18,12 @@ export default async function LoginPage({
   async function login(formData: FormData) {
     "use server"
     const { PASSWORD, PASSWORD_SECRET } = process.env
-    if (!PASSWORD || !PASSWORD_SECRET) throw new Error("Auth is not configured.")
+    if (!PASSWORD || !PASSWORD_SECRET)
+      throw new Error("Auth is not configured.")
 
-    if (!(await passwordMatches(String(formData.get("password") ?? ""), PASSWORD))) {
+    if (
+      !(await passwordMatches(String(formData.get("password") ?? ""), PASSWORD))
+    ) {
       redirect("/login?error=1")
     }
 
@@ -39,15 +42,19 @@ export default async function LoginPage({
       <div
         aria-hidden
         className="pointer-events-none absolute -top-40 left-1/2 -z-10 size-[36rem] -translate-x-1/2 rounded-full opacity-15 blur-3xl dark:opacity-25"
-        style={{ background: "radial-gradient(circle, #3F00FF, transparent 65%)" }}
+        style={{
+          background: "radial-gradient(circle, #3F00FF, transparent 65%)",
+        }}
       />
 
       <div>
-        <p className="text-2xl font-semibold tracking-tight text-primary">arago spot</p>
+        <p className="text-2xl font-semibold tracking-tight text-primary">
+          arago spot
+        </p>
         <h1 className="mt-3 text-xl font-semibold tracking-tight">
           Connection message generator
         </h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <p className="mt-1 text-sm text-muted-foreground">
           This preview is password protected.
         </p>
       </div>
@@ -68,7 +75,11 @@ export default async function LoginPage({
           aria-describedby={error ? "password-error" : undefined}
         />
         {error && (
-          <p id="password-error" role="alert" className="text-destructive text-sm">
+          <p
+            id="password-error"
+            role="alert"
+            className="text-sm text-destructive"
+          >
             Incorrect password.
           </p>
         )}
