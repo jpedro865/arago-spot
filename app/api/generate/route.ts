@@ -1,4 +1,4 @@
-import { getJobs } from "@/lib/ashby"
+import { getJobs, resolveJob } from "@/lib/ashby"
 import { UserError, publicMessage } from "@/lib/errors"
 import { generate } from "@/lib/generate"
 import { log } from "@/lib/log"
@@ -31,7 +31,8 @@ export async function POST(req: Request) {
 
   try {
     // inside the try: an Ashby blip must still answer JSON, or the client parses an HTML 500
-    const job = (await getJobs()).find((j) => j.id === body.jobId)
+    // accepts the dropdown's id or a pasted Ashby posting URL
+    const job = resolveJob(await getJobs(), body.jobId)
     if (!job) {
       log.warn("generate: unknown job", { jobId: body.jobId })
       throw new UserError("Unknown role — pick one from the list.")

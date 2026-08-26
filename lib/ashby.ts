@@ -8,6 +8,18 @@ export type Job = {
   descriptionPlain: string
 }
 
+// `jobUrl` is always board + id, so the id *is* the trailing UUID — verified across the whole board
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+
+/**
+ * The dropdown sends a bare id; someone arriving from the job board pastes the posting URL.
+ * A bare id is itself a UUID, so one match handles both and neither path needs its own branch.
+ */
+export function resolveJob(jobs: Job[], input: string): Job | undefined {
+  const id = input.match(UUID)?.[0].toLowerCase()
+  return id ? jobs.find((j) => j.id.toLowerCase() === id) : undefined
+}
+
 export async function getJobs(): Promise<Job[]> {
   if (!BOARD_URL) throw new Error("Missing BOARD_URL env var")
   const started = Date.now()

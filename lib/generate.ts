@@ -159,7 +159,17 @@ async function call(
     log.error("openrouter: no content in response", { model, body })
     throw new Error("OpenRouter returned no content.")
   }
-  return JSON.parse(content) as Draft
+  // `strict: true` + `require_parameters` should make this unreachable, but it is still a
+  // response from someone else's server — a cast would only move the failure somewhere worse
+  const draft = JSON.parse(content)
+  if (
+    typeof draft?.message !== "string" ||
+    typeof draft?.evidence !== "string"
+  ) {
+    log.error("openrouter: response did not match the schema", { model, draft })
+    throw new Error("OpenRouter returned an unexpected shape.")
+  }
+  return draft as Draft
 }
 
 export async function generate(
