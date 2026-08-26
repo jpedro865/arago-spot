@@ -1,4 +1,5 @@
 import type { Job } from "./ashby"
+import { log } from "./log.ts"
 import type { Profile } from "./profile"
 
 export const LIMIT = 300
@@ -8,7 +9,8 @@ export const LIMIT = 300
  * Normalise CRLF -> LF first: a pasted \r\n is one line break, not two characters.
  * Spread, not `.length` — `.length` counts UTF-16 units, so an emoji would read as 2.
  */
-export const countChars = (s: string) => [...s.replace(/\r\n?/g, "\n").trim()].length
+export const countChars = (s: string) =>
+  [...s.replace(/\r\n?/g, "\n").trim()].length
 export const withinLimit = (s: string) => {
   const n = countChars(s)
   return n > 0 && n <= LIMIT
@@ -58,8 +60,14 @@ Match the rhythm and the restraint, never the wording.`
 const schema = {
   type: "object",
   properties: {
-    message: { type: "string", description: `The connection request, max ${LIMIT} characters.` },
-    evidence: { type: "string", description: "The profile detail used, quoted verbatim." },
+    message: {
+      type: "string",
+      description: `The connection request, max ${LIMIT} characters.`,
+    },
+    evidence: {
+      type: "string",
+      description: "The profile detail used, quoted verbatim.",
+    },
   },
   required: ["message", "evidence"],
   additionalProperties: false,
@@ -67,7 +75,10 @@ const schema = {
 
 function userPrompt(profile: Profile, job: Job, previous: string[]) {
   const exp = profile.work_experience
-    .map((e) => `- ${e.position}, ${e.company} (${e.duration})${e.description ? `: ${e.description}` : ""}`)
+    .map(
+      (e) =>
+        `- ${e.position}, ${e.company} (${e.duration})${e.description ? `: ${e.description}` : ""}`
+    )
     .join("\n")
   return [
     `CANDIDATE PROFILE`,
@@ -86,16 +97,25 @@ function userPrompt(profile: Profile, job: Job, previous: string[]) {
   ].join("\n")
 }
 
-async function call(messages: { role: string; content: string }[]): Promise<Draft> {
+async function call(
+  messages: { role: string; content: string }[]
+): Promise<Draft> {
   const key = process.env.OPENROUTER_API_KEY
   if (!key) throw new Error("OPENROUTER_API_KEY is not set.")
 
+  // || not ?? — an unset-but-present `OPENROUTER_MODEL=` is "", which ?? happily passes through
+  const model = process.env.OPENROUTER_MODEL || "anthropic/claude-opus-5"
+  log.debug("openrouter: request", { model, messages })
+
+  const started = Date.now()
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({
-      // || not ?? — an unset-but-present `OPENROUTER_MODEL=` is "", which ?? happily passes through
-      model: process.env.OPENROUTER_MODEL || "anthropic/claude-opus-5",
+      model,
       messages,
       response_format: {
         type: "json_schema",
@@ -108,10 +128,36 @@ async function call(messages: { role: string; content: string }[]): Promise<Draf
     }),
   })
 
-  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 300)}`)
+  const ms = Date.now() - started
+
+  if (!res.ok) {
+    const text = (await res.text()).slice(0, 300)
+    log.error("openrouter: request failed", {
+      model,
+      status: res.status,
+      ms,
+      body: text,
+    })
+    throw new Error(`OpenRouter ${res.status}: ${text}`)
+  }
+
   const body = await res.json()
+  // `served` is the endpoint OpenRouter actually routed to, which is not always `model` —
+  // that plus `usage` is the whole cost/latency picture for the §5.1 model comparison.
+  log.info("openrouter: completion", {
+    model,
+    served: body.model,
+    provider: body.provider,
+    ms,
+    usage: body.usage,
+    finish: body.choices?.[0]?.finish_reason,
+  })
+
   const content = body.choices?.[0]?.message?.content
-  if (!content) throw new Error("OpenRouter returned no content.")
+  if (!content) {
+    log.error("openrouter: no content in response", { model, body })
+    throw new Error("OpenRouter returned no content.")
+  }
   return JSON.parse(content) as Draft
 }
 
@@ -125,11 +171,29 @@ export async function generate(
     { role: "user", content: userPrompt(profile, job, previous) },
   ]
 
+  log.info("generate: drafting", {
+    candidate: profile.name,
+    job: job.title,
+    attemptsToBeat: previous.length,
+  })
+
   const first = await call(messages)
-  if (withinLimit(first.message)) return first
+  if (withinLimit(first.message)) {
+    log.info("generate: accepted", {
+      chars: countChars(first.message),
+      retried: false,
+    })
+    log.debug("generate: draft", { draft: first })
+    return first
+  }
 
   // models cannot count characters — the limit is enforced here, never trusted to the prompt
   const over = countChars(first.message) - LIMIT
+  // a retry rate creeping up is the prompt drifting long, not a one-off
+  log.warn("generate: over the limit, retrying", {
+    chars: countChars(first.message),
+    over,
+  })
   const second = await call([
     ...messages,
     { role: "assistant", content: JSON.stringify(first) },
@@ -138,7 +202,18 @@ export async function generate(
       content: `That message is ${countChars(first.message)} characters — ${over} over the ${LIMIT} limit. Rewrite it shorter. Keep the same specific detail. Do not truncate mid-sentence.`,
     },
   ])
-  if (withinLimit(second.message)) return second
+  if (withinLimit(second.message)) {
+    log.info("generate: accepted", {
+      chars: countChars(second.message),
+      retried: true,
+    })
+    log.debug("generate: draft", { draft: second })
+    return second
+  }
 
+  log.error("generate: still over the limit after the retry", {
+    first: countChars(first.message),
+    second: countChars(second.message),
+  })
   throw new Error(`Could not get under ${LIMIT} characters after two attempts.`)
 }

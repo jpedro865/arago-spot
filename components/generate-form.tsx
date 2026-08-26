@@ -32,7 +32,7 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, previous }),
+        body: JSON.stringify({ profileUrl, jobId, previous }),
       })
       const body = await res.json()
       if (!res.ok) throw new Error(body.error ?? "Generation failed.")
@@ -69,10 +69,6 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
             onChange={(e) => setProfileUrl(e.target.value)}
             placeholder="https://www.linkedin.com/in/..."
           />
-          {/* ponytail: ignored until phase 3 — generation runs on the fixture profile */}
-          <p className="text-muted-foreground text-xs">
-            Not read yet — this build generates from a fixed sample profile.
-          </p>
         </div>
 
         <div className="grid min-w-0 gap-2">
@@ -100,7 +96,7 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
               href={`https://jobs.ashbyhq.com/arago/${jobId}`}
               target="_blank"
               rel="noreferrer"
-              className="text-muted-foreground hover:text-primary inline-flex w-fit items-center gap-1 text-xs underline-offset-4 transition-colors hover:underline"
+              className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
             >
               View this posting
               <ExternalLink className="size-3" />
@@ -115,7 +111,10 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
       </form>
 
       {error && (
-        <p role="alert" className="text-destructive min-w-0 text-sm break-words">
+        <p
+          role="alert"
+          className="min-w-0 text-sm break-words text-destructive"
+        >
           {error}
         </p>
       )}
@@ -135,8 +134,8 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
             <p
               className={
                 count > LIMIT
-                  ? "text-destructive text-xs tabular-nums"
-                  : "text-muted-foreground text-xs tabular-nums"
+                  ? "text-xs text-destructive tabular-nums"
+                  : "text-xs text-muted-foreground tabular-nums"
               }
             >
               {count}/{LIMIT}
@@ -151,7 +150,7 @@ export function GenerateForm({ jobs }: { jobs: Job[] }) {
               Regenerate
             </Button>
           </div>
-          <p className="text-muted-foreground mt-2 text-xs">
+          <p className="mt-2 text-xs text-muted-foreground">
             Based on: <span className="text-foreground">{draft.evidence}</span>
           </p>
         </div>

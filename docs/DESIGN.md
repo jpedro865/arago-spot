@@ -74,6 +74,8 @@ X-API-KEY: {UNIPILE_API_KEY}
 - We use `linkedin_sections` to request only the sections we ground on, keeping payload and token count down.
 - Calls execute **on behalf of a connected LinkedIn account** (mine, connected once via Unipile hosted auth). This is Unipile's stated model and is what keeps the integration within third-party terms — §7 of the assignment.
 
+The lookup is a `GET` with `next: { revalidate: 3600 }`, so **Regenerate never reaches LinkedIn again** — the Data Cache answers the identical URL. That is the §6 "no refetch" promise and the §9 rate-limit mitigation, and it costs no code: same idiom as the Ashby fetch, no client-side profile cache to trust and validate.
+
 **Known risk:** the Unipile trial is **7 days**, and it bills per connected account after. Mitigation: start the trial timed to submission, and ship §4.3 as a permanent fallback so the product never hard-fails in front of a reviewer.
 
 ### 4.2 Job — Ashby public posting API
@@ -309,6 +311,8 @@ Covered over the logic that fails silently:
 - `lib/generate.test.ts` *(written)* — the limit boundary at exactly 300/301, empty and whitespace-only drafts, and astral characters counted once rather than twice.
 - `resolveJob()` — UUID extraction from a pasted Ashby URL, and the not-found case.
 
+One convention this forces: a *value* import between `lib/` modules needs the explicit `.ts` extension (`from "./log.ts"`). Next resolves either form, but `node --experimental-strip-types` uses Node's ESM resolver, which does not guess extensions — so an extensionless import passes `tsc` and `next build` and fails only under `npm test`. Type-only imports are exempt: they are erased before Node sees them.
+
 Not tested: the OpenRouter call and the Unipile call. Mocking them would test the mocks. Both are exercised manually against the live services before submission.
 
 ---
@@ -369,9 +373,9 @@ Crypto goes through **Web Crypto** (`crypto.subtle`), not Node's `crypto` — th
 
 ## 10. Build order
 
-1. Ashby fetch + job dropdown *(no dependencies, verified working — ships the UX win first)*
-2. Claude generation against a hardcoded profile fixture — proves the prompt, the structured output, and the 300-char loop
-3. Unipile integration behind the same interface
+1. Ashby fetch + job dropdown *(no dependencies, verified working — ships the UX win first)* — **done**
+2. Claude generation against a hardcoded profile fixture — proves the prompt, the structured output, and the 300-char loop — **done**
+3. Unipile integration behind the same interface — **done**; the fixture is deleted, `lib/unipile.ts` maps `GET /users/{id}` onto the same `Profile`, and nothing above it changed. Not yet exercised against the live API — the trial is timed to submission (§9), so the first real call is the one to watch.
 4. UI polish, copy, error states
 5. Tests, README, deploy — **submittable from here**
 6. PDF fallback
